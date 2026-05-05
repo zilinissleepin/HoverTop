@@ -325,24 +325,25 @@ def calculate_spot_value(
         return 0.0
     total = 0.0
     for token in tokens:
-        if token in TOKEN_AMOUNTS:
-            total += TOKEN_AMOUNTS[token] * prices.get(token, 0)
-        elif spot_balances and token in spot_balances:
+        if spot_balances and token in spot_balances:
             total += spot_balances[token] * prices.get(token, 0)
+        elif token in TOKEN_AMOUNTS:
+            total += TOKEN_AMOUNTS[token] * prices.get(token, 0)
     return total
 
 
 def calculate_alpha_value(
     alpha_holdings: dict[str, dict] | None,
     tokens: list[str],
+    market: dict[str, dict] | None,
 ) -> float:
     """计算 Alpha 持仓总值"""
-    if alpha_holdings is None:
-        return 0.0
     total = 0.0
     for token in tokens:
-        if token in alpha_holdings:
+        if alpha_holdings and token in alpha_holdings:
             total += alpha_holdings[token]["valuation"]
+        elif token in TOKEN_AMOUNTS:
+            total += TOKEN_AMOUNTS[token] * market.get(token, {}).get("price", 0) if market else 0
     return total
 
 
@@ -404,22 +405,25 @@ def build_data() -> dict:
     spot_balances = get_spot_balances() if has_api_keys else None
     futures_positions = get_futures_positions() if has_api_keys else None
     spot_prices_map = get_token_prices() if has_holdings else None
-    alpha_holdings = get_alpha_holdings() if (has_holdings and ALPHA_TOKENS) else None
+    # alpha_holdings = get_alpha_holdings() if (has_holdings and ALPHA_TOKENS) else None
+    alpha_holdings = None
 
     spot_total = calculate_spot_value(SPOT_TOKENS, spot_balances, spot_prices_map) if has_holdings else 0.0
-    alpha_total = calculate_alpha_value(alpha_holdings, ALPHA_TOKENS) if has_holdings else 0.0
+    alpha_total = calculate_alpha_value(alpha_holdings, ALPHA_TOKENS, alpha_market) if has_holdings else 0.0
+
     # 合约浮盈累加
     futures_pnl_total = 0.0
     if futures_positions:
         futures_pnl_total = sum(p["pnl"] for p in futures_positions.values())
-    grand_total = spot_total + alpha_total + futures_pnl_total
+    
+    grand_total = spot_total + alpha_total
 
     items = []
 
     # ── 表头 + 总值 (始终置顶) ──
     total_text = format_value(grand_total) if has_holdings else DASH
     items.append({
-        "label": "总值",
+        "label": "现货/Alpha",
         "value": "",
         "color": "#FF9800",
         "cells": ["", "", total_text],
@@ -450,10 +454,10 @@ def build_data() -> dict:
         hold_val: float | None = None
         if has_holdings and spot_prices_map:
             unit_price = spot_prices_map.get(name, 0)
-            if name in TOKEN_AMOUNTS:
-                hold_val = TOKEN_AMOUNTS[name] * unit_price
-            elif spot_balances and name in spot_balances:
+            if spot_balances and name in spot_balances:
                 hold_val = spot_balances[name] * unit_price
+            elif name in TOKEN_AMOUNTS:
+                hold_val = TOKEN_AMOUNTS[name] * unit_price
         add_row(name, price, change, hold_val, color)
 
     # Alpha
@@ -466,6 +470,8 @@ def build_data() -> dict:
         hold_val = None
         if alpha_holdings and token in alpha_holdings:
             hold_val = alpha_holdings[token]["valuation"]
+        elif token in TOKEN_AMOUNTS:
+            hold_val = TOKEN_AMOUNTS[token] * alpha_market.get(token, {}).get("price", 0) if alpha_market else 0
         add_row(token, price, change, hold_val, color)
 
     rows.sort(key=lambda r: r[0], reverse=True)
@@ -484,7 +490,7 @@ def build_data() -> dict:
             pnl = pos["pnl"]
             pnl_text = fmt_pnl(pnl)
             color = color_for_pnl(pnl)
-            sort_key = abs(pnl)
+            sort_key = pnl
         else:
             pnl_text = DASH
             color = color_for_change(change) if change is not None else "#FFFFFF"
@@ -493,7 +499,7 @@ def build_data() -> dict:
         futures_rows.append((
             sort_key,
             {
-                "label": name,
+                "label": f"PERP {name}",
                 "value": "",
                 "color": color,
                 "cells": [fmt_price(price), fmt_change(change), pnl_text],
@@ -504,9 +510,10 @@ def build_data() -> dict:
         # 合约板块表头 (与"总值"行风格一致, 但显示合约浮盈合计)
         futures_total_text = fmt_pnl(futures_pnl_total) if futures_positions else DASH
         items.append({
-            "label": "合约浮盈",
+            "label": "合约",
             "value": "",
-            "color": color_for_pnl(futures_pnl_total) if futures_positions else "#FF9800",
+            # "color": color_for_pnl(futures_pnl_total) if futures_positions else "#FF9800",
+            "color": "#FF9800",
             "cells": ["", "", futures_total_text],
         })
         futures_rows.sort(key=lambda r: r[0], reverse=True)
