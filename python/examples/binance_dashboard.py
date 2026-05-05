@@ -36,12 +36,22 @@
 import gzip
 import json
 import os
+import sys
 import time
+import traceback
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from hovertop import Widget
+
+
+def log_err(where: str, exc: BaseException) -> None:
+    """打印错误到 stderr，包含调用位置和异常类型"""
+    print(f"[{time.strftime('%H:%M:%S')}] {where}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    # 仅在调试模式下打印完整 traceback
+    if os.environ.get("DEBUG"):
+        traceback.print_exc(file=sys.stderr)
 
 # 自动加载 python/.env 文件
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
@@ -138,8 +148,8 @@ def fetch_spot_prices(symbols: list[str]) -> dict[str, dict]:
                 "price": format_number(float(data["lastPrice"])),
                 "change": data["priceChangePercent"],
             }
-        except Exception:
-            pass
+        except Exception as e:
+            log_err(f"fetch_spot_prices({symbol})", e)
     return result
 
 
@@ -158,8 +168,8 @@ def fetch_futures_prices(symbols: list[str]) -> dict[str, dict]:
                 "price": format_number(float(data["lastPrice"])),
                 "change": data["priceChangePercent"],
             }
-        except Exception:
-            pass
+        except Exception as e:
+            log_err(f"fetch_futures_prices({symbol})", e)
     return result
 
 
@@ -197,8 +207,8 @@ def fetch_alpha_prices(tokens: list[str]) -> dict[str, dict]:
                     "price": float(token.get("price", 0)),
                     "change": change,
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        log_err("fetch_alpha_prices", e)
     return result
 
 
@@ -236,7 +246,8 @@ def get_spot_balances() -> dict[str, float] | None:
             if total > 0:
                 balances[b["asset"]] = total
         return balances
-    except Exception:
+    except Exception as e:
+        log_err("get_spot_balances", e)
         return None
 
 
@@ -262,7 +273,8 @@ def get_futures_positions() -> dict[str, dict] | None:
                 "pnl": float(p.get("unrealizedProfit", 0)),
             }
         return positions
-    except Exception:
+    except Exception as e:
+        log_err("get_futures_positions", e)
         return None
 
 
@@ -296,7 +308,8 @@ def get_alpha_holdings() -> dict[str, dict] | None:
             if amount > 0:
                 holdings[sym] = {"amount": amount, "valuation": valuation}
         return holdings
-    except Exception:
+    except Exception as e:
+        log_err("get_alpha_holdings", e)
         return None
 
 
@@ -311,7 +324,8 @@ def get_token_prices() -> dict[str, float] | None:
             if sym.endswith("USDT"):
                 prices[sym[:-4]] = float(item["price"])
         return prices
-    except Exception:
+    except Exception as e:
+        log_err("get_token_prices", e)
         return None
 
 
@@ -534,6 +548,7 @@ def main() -> None:
             try:
                 widget.update(**build_data())
             except Exception as e:
+                log_err("build_data/update", e)
                 widget.update(
                     title="币安仪表盘",
                     subtitle="数据获取失败",
