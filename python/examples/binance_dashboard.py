@@ -233,40 +233,55 @@ def fetch_alpha_prices(tokens: list[str]) -> dict[str, dict]:
 # --- 持仓查询 ---
 
 
-def make_signed_request(url: str, params: dict | None = None, timeout: int = 15) -> dict:
+def make_signed_request(
+    url: str,
+    params: dict | None = None,
+    timeout: int = 20,
+    retries: int = 2,
+) -> dict:
     """发送带签名的币安 API 请求
 
-    HTTPError 时会读取响应体附带在异常 message 里, 便于定位币安返回的具体错误码。
+    - 自动重试 (默认共 3 次): 网络超时/读超时时退避后重试
+    - HTTPError 时读取响应体附带在异常 message 里, 不重试 (避免重复触发 ban)
     """
     import hashlib
     import hmac as hmac_mod
 
-    if params is None:
-        params = {}
-    params["timestamp"] = int(time.time() * 1000)
-    # recvWindow: 容忍本地与服务器时钟漂移; fapi 接口默认 5000ms 比较严格
-    params.setdefault("recvWindow", 10000)
-    query_string = urlencode(params)
-    signature = hmac_mod.new(
-        SECRET_KEY.encode("utf-8"),
-        query_string.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    params["signature"] = signature
-    full_url = f"{url}?{urlencode(params)}"
-    req = Request(full_url, headers={"X-MBX-APIKEY": API_KEY, "User-Agent": "Mozilla/5.0"})
-    try:
-        with urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read())
-    except HTTPError as e:
-        # 读取币安返回的错误 JSON, 附带在异常上重新抛出
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        # 每次重新算 timestamp+签名 (避免时间戳过期)
+        local_params = dict(params) if params else {}
+        local_params["timestamp"] = int(time.time() * 1000)
+        # recvWindow: 容忍本地与服务器时钟漂移; fapi 接口默认 5000ms 比较严格
+        local_params.setdefault("recvWindow", 10000)
+        query_string = urlencode(local_params)
+        signature = hmac_mod.new(
+            SECRET_KEY.encode("utf-8"),
+            query_string.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        local_params["signature"] = signature
+        full_url = f"{url}?{urlencode(local_params)}"
+        req = Request(full_url, headers={"X-MBX-APIKEY": API_KEY, "User-Agent": "Mozilla/5.0"})
         try:
-            body = e.read().decode("utf-8", errors="replace")
-        except Exception:
-            body = "<no body>"
-        raise HTTPError(
-            e.url, e.code, f"{e.reason} | body={body}", e.headers, None
-        ) from None
+            with urlopen(req, timeout=timeout) as response:
+                return json.loads(response.read())
+        except HTTPError as e:
+            # 4xx/5xx: 读取币安返回的错误 JSON, 不重试
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = "<no body>"
+            raise HTTPError(
+                e.url, e.code, f"{e.reason} | body={body}", e.headers, None
+            ) from None
+        except (TimeoutError, OSError) as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(0.5 * (attempt + 1))  # 0.5s, 1s 退避
+
+    assert last_err is not None
+    raise last_err
 
 
 def get_spot_balances() -> dict[str, float] | None:
@@ -291,19 +306,26 @@ def get_futures_positions() -> dict[str, dict] | None:
       - amount: 持仓张数 (正=多, 负=空)
       - entry:  开仓均价
       - pnl:    未实现盈亏 (USDT)
+
+    使用 /fapi/v3/positionRisk: 只返回有持仓的 symbol, 响应体小、速度快;
+    /fapi/v2/account 返回全部 symbol (几百个), 容易触发读超时。
     """
     try:
-        data = make_signed_request("https://fapi.binance.com/fapi/v2/account")
+        data = make_signed_request("https://fapi.binance.com/fapi/v3/positionRisk")
+        # v3/positionRisk 返回列表; 防御性处理: 也支持 dict 包裹格式
+        rows = data if isinstance(data, list) else data.get("positions", [])
         positions: dict[str, dict] = {}
-        for p in data.get("positions", []):
+        for p in rows:
             amt = float(p.get("positionAmt", 0))
             if amt == 0:
                 continue
             sym = p.get("symbol", "")
+            # 不同端点字段名: unRealizedProfit (v3) / unrealizedProfit (v2)
+            pnl = p.get("unRealizedProfit") or p.get("unrealizedProfit") or 0
             positions[sym] = {
                 "amount": amt,
                 "entry": float(p.get("entryPrice", 0)),
-                "pnl": float(p.get("unrealizedProfit", 0)),
+                "pnl": float(pnl),
             }
         return positions
     except Exception as e:
