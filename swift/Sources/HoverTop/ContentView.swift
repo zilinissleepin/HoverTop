@@ -3,6 +3,17 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var state = DisplayState.shared
 
+    /// 列宽配置 (与 Python 端约定)
+    /// label | price | change | holding
+    private let labelWidth: CGFloat = 78
+    private let priceWidth: CGFloat = 92
+    private let changeWidth: CGFloat = 68
+    private let holdingWidth: CGFloat = 100
+
+    private var totalRowWidth: CGFloat {
+        labelWidth + priceWidth + changeWidth + holdingWidth
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // 标题区
@@ -24,15 +35,7 @@ struct ContentView: View {
 
             // 数据项
             ForEach(state.data.items) { item in
-                HStack {
-                    Text(item.label)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(item.value)
-                        .font(.body.monospaced())
-                        .foregroundColor(colorFromHex(item.color))
-                }
+                rowView(for: item)
             }
 
             // 底部
@@ -44,8 +47,46 @@ struct ContentView: View {
             }
         }
         .padding(16)
-        .frame(width: 260)
+        .frame(width: totalRowWidth + 32)  // 内容宽度 + 左右 padding
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func rowView(for item: DisplayItem) -> some View {
+        let color = colorFromHex(item.color)
+        if let cells = item.cells, cells.count >= 3 {
+            // 多列模式: label | price | change | holding
+            HStack(spacing: 0) {
+                Text(item.label)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .frame(width: labelWidth, alignment: .leading)
+                Text(cells[0])
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(color)
+                    .frame(width: priceWidth, alignment: .trailing)
+                Text(cells[1])
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(color)
+                    .frame(width: changeWidth, alignment: .trailing)
+                Text(cells[2])
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(color)
+                    .frame(width: holdingWidth, alignment: .trailing)
+            }
+        } else {
+            // 兼容: label + value 两列模式
+            HStack(spacing: 0) {
+                Text(item.label)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .frame(width: labelWidth, alignment: .leading)
+                Text(item.value)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(color)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
     }
 
     private func colorFromHex(_ hex: String?) -> Color {

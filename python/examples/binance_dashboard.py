@@ -1,4 +1,7 @@
-"""币安仪表盘悬浮窗示例 - 合约价格 + Alpha 代币 + 持仓总值
+"""币安仪表盘悬浮窗 - 行情 + 持仓
+
+板块一: 现货/合约/Alpha 代币价格及涨跌幅
+板块二: 账户持仓总值及各标的持仓价值
 
 每 10 秒刷新一次。
 
@@ -20,7 +23,7 @@
   BINANCE_CSRFTOKEN=your_csrf_token
 
   # 3. 不配置环境变量
-  # 仅显示合约行情和 Alpha 代币价格，不显示持仓
+  # 仅显示行情，不显示持仓
 
 环境变量说明:
   TOKEN_AMOUNTS      - 代币数量，格式: "BTC:0.5,SOL:10" (优先使用，不查 API)
@@ -39,7 +42,6 @@ import gzip
 import json
 import os
 import time
-from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -51,14 +53,17 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # ============ 配置区域 ============
 
+# 现货行情监控列表 (格式: 'BTCUSDT')
+SPOT_SYMBOLS = ["VIRTUALUSDT"]
+
 # 合约行情监控列表 (格式: 'BTCUSDT')
 FUTURES_SYMBOLS = ["BTCUSDT", "SOLUSDT"]
 
 # Alpha 代币监控列表 (格式: 'SENTIS')
 ALPHA_TOKENS = ["SENTIS"]
 
-# 持仓监控 - 现货代币列表
-PORTFOLIO_TOKENS = ["BTC", "SOL", "VIRTUAL"]
+# 现货持仓代币列表 (用于查询持仓数量)
+SPOT_TOKENS = ["BTC", "SOL", "VIRTUAL"]
 
 # 代币数量配置 (直接指定数量，跳过 API 查询)
 # 环境变量格式: export TOKEN_AMOUNTS="BTC:0.5,SOL:10.0,VIRTUAL:1000"
@@ -105,29 +110,38 @@ def get_json(url: str, headers: dict | None = None) -> dict:
         return json.loads(content)
 
 
-def format_price(price_str: str) -> str:
-    """去除价格字符串末尾多余的零"""
-    if "." in price_str:
-        return price_str.rstrip("0").rstrip(".")
-    return price_str
-
-
-def format_amount(value: float) -> str:
-    """格式化数量: 4 位有效数字"""
-    if value >= 1000:
-        return f"{value:,.0f}"
-    elif value >= 1:
-        return f"{value:.4g}"
-    else:
-        return f"{value:.4g}"
+def format_number(value: float) -> str:
+    """统一数值格式: >=1 保留 2 位小数, <1 保留 4 位有效数字"""
+    if value == 0:
+        return "0"
+    if abs(value) >= 1:
+        return f"{value:,.2f}"
+    return f"{value:.4g}"
 
 
 def format_value(value: float) -> str:
-    """格式化金额: 小数点后 2 位"""
-    if value >= 1000:
-        return f"${value:,.2f}"
-    else:
-        return f"${value:.2f}"
+    """格式化美元金额: 前缀 $ + 统一数值格式"""
+    return f"${format_number(value)}"
+
+
+# --- 现货行情 ---
+
+
+def fetch_spot_prices(symbols: list[str]) -> dict[str, dict]:
+    """获取现货 24h 行情"""
+    result = {}
+    for symbol in symbols:
+        try:
+            url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
+            data = get_json(url)
+            name = symbol.replace("USDT", "").replace("USDC", "")
+            result[name] = {
+                "price": format_number(float(data["lastPrice"])),
+                "change": data["priceChangePercent"],
+            }
+        except Exception:
+            pass
+    return result
 
 
 # --- 合约行情 ---
@@ -142,7 +156,7 @@ def fetch_futures_prices(symbols: list[str]) -> dict[str, dict]:
             data = get_json(url)
             name = symbol.replace("USDT", "").replace("USDC", "")
             result[name] = {
-                "price": format_price(data["lastPrice"]),
+                "price": format_number(float(data["lastPrice"])),
                 "change": data["priceChangePercent"],
             }
         except Exception:
@@ -153,22 +167,40 @@ def fetch_futures_prices(symbols: list[str]) -> dict[str, dict]:
 # --- Alpha 代币 ---
 
 
-def fetch_alpha_prices(tokens: list[str]) -> dict[str, float]:
-    """批量获取 Alpha 代币价格"""
-    prices: dict[str, float] = {}
+def fetch_alpha_prices(tokens: list[str]) -> dict[str, dict]:
+    """批量获取 Alpha 代币价格及涨跌幅
+
+    返回: {symbol: {'price': float, 'change': float | None}}
+    涨跌幅字段在不同版本 API 中可能缺失，此时为 None。
+    """
+    result: dict[str, dict] = {}
     if not tokens:
-        return prices
+        return result
     try:
         url = "https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/alpha/all/token/list"
         data = get_json(url)
         if data.get("code") == "000000":
             for token in data.get("data", []):
                 sym = token.get("symbol")
-                if sym in tokens:
-                    prices[sym] = float(token.get("price", 0))
+                if sym not in tokens:
+                    continue
+                # 尝试多个常见字段名取涨跌幅
+                raw_change = (
+                    token.get("percentChange24h")
+                    or token.get("priceChangePercent")
+                    or token.get("change24h")
+                )
+                try:
+                    change = float(raw_change) if raw_change is not None else None
+                except (TypeError, ValueError):
+                    change = None
+                result[sym] = {
+                    "price": float(token.get("price", 0)),
+                    "change": change,
+                }
     except Exception:
         pass
-    return prices
+    return result
 
 
 # --- 持仓查询 ---
@@ -272,106 +304,182 @@ def get_token_prices() -> dict[str, float] | None:
         return None
 
 
-def calculate_portfolio(
+def calculate_spot_value(
     tokens: list[str],
     spot_balances: dict[str, float] | None,
-    futures_balances: dict[str, float] | None,
     prices: dict[str, float] | None,
-) -> tuple[float, list[tuple[str, float, float]]]:
-    """计算持仓总值，返回 (总值, [(代币, 数量, 价值)])
-
-    如果 TOKEN_AMOUNTS 中配置了某个代币的数量，直接使用，不查询 API。
-    """
+) -> float:
+    """计算现货持仓总值"""
     if prices is None:
-        return 0, []
-
+        return 0.0
     total = 0.0
-    details: list[tuple[str, float, float]] = []
-
     for token in tokens:
-        value = 0.0
-        amount = 0.0
-
-        # 优先使用手动配置的数量
         if token in TOKEN_AMOUNTS:
-            amount = TOKEN_AMOUNTS[token]
-            if token in prices:
-                value = amount * prices[token]
-        else:
-            if spot_balances and token in spot_balances:
-                amt = spot_balances[token]
-                if token in prices:
-                    value += amt * prices[token]
-                    amount += amt
+            total += TOKEN_AMOUNTS[token] * prices.get(token, 0)
+        elif spot_balances and token in spot_balances:
+            total += spot_balances[token] * prices.get(token, 0)
+    return total
 
-            if token == "USDT" and futures_balances and "USDT" in futures_balances:
-                amt = futures_balances["USDT"]
-                value += amt
-                amount += amt
 
-        if value > 0:
-            total += value
-            details.append((token, amount, value))
+def calculate_futures_value(
+    futures_balances: dict[str, float] | None,
+) -> float:
+    """计算合约账户 USDT 余额"""
+    if futures_balances is None:
+        return 0.0
+    return futures_balances.get("USDT", 0)
 
-    return total, details
+
+def calculate_alpha_value(
+    alpha_holdings: dict[str, dict] | None,
+    tokens: list[str],
+) -> float:
+    """计算 Alpha 持仓总值"""
+    if alpha_holdings is None:
+        return 0.0
+    total = 0.0
+    for token in tokens:
+        if token in alpha_holdings:
+            total += alpha_holdings[token]["valuation"]
+    return total
+
+
+def color_for_change(change: float) -> str:
+    """涨跌颜色: 涨绿跌红"""
+    return "#4CAF50" if change >= 0 else "#F44336"
 
 
 def build_data() -> dict:
-    """构建悬浮窗展示数据"""
-    items = []
+    """构建悬浮窗展示数据 - 单板块四列布局
 
-    # ── 上方: 行情 (价格 + 涨跌幅) ──
-    futures = fetch_futures_prices(FUTURES_SYMBOLS)
-    for name, info in futures.items():
-        change = float(info["change"]) if info["change"] else 0
-        color = "#4CAF50" if change >= 0 else "#F44336"
-        items.append({
-            "label": f"{name}",
-            "value": f"{info['price']}  {change:+.2f}%",
-            "color": color,
-        })
+    每行 cells = [价格, 涨跌幅, 持仓价值]，由 Swift 端按列宽渲染对齐
+    """
+    DASH = "—"
 
-    alpha_prices = fetch_alpha_prices(ALPHA_TOKENS)
-    for token in ALPHA_TOKENS:
-        price = alpha_prices.get(token, 0)
-        items.append({
-            "label": f"α{token}",
-            "value": f"{format_value(price)}",
-            "color": "#FF9800",
-        })
+    def fmt_price(price: str | float | None) -> str:
+        if price is None or price == "":
+            return DASH
+        return price if isinstance(price, str) else format_number(float(price))
 
-    # ── 下方: 持仓 (美元价值) ──
+    def fmt_change(change: float | None) -> str:
+        if change is None:
+            return DASH
+        return f"{change:+.2f}%"
+
+    def fmt_hold(value: float | None) -> str:
+        if value is None or value <= 0:
+            return DASH
+        return format_value(value)
+
+    # ── 收集行情 ──
+    spot_market = fetch_spot_prices(SPOT_SYMBOLS)
+    futures_market = fetch_futures_prices(FUTURES_SYMBOLS)
+    alpha_market = fetch_alpha_prices(ALPHA_TOKENS)
+
+    # ── 收集持仓 ──
     has_manual_amounts = bool(TOKEN_AMOUNTS)
     has_api_keys = bool(API_KEY and SECRET_KEY)
-    if has_manual_amounts or has_api_keys:
-        spot = get_spot_balances() if has_api_keys else None
-        futures_bal = get_futures_balances() if has_api_keys else None
-        prices = get_token_prices()
-        total, details = calculate_portfolio(PORTFOLIO_TOKENS, spot, futures_bal, prices)
+    has_holdings = has_manual_amounts or has_api_keys
 
-        alpha_holdings = get_alpha_holdings() if ALPHA_TOKENS else None
-        alpha_total = 0.0
-        if alpha_holdings:
-            for token in ALPHA_TOKENS:
-                if token in alpha_holdings:
-                    h = alpha_holdings[token]
-                    alpha_total += h["valuation"]
-                    details.append((f"α{token}", h["amount"], h["valuation"]))
+    spot_balances = get_spot_balances() if has_api_keys else None
+    futures_balances = get_futures_balances() if has_api_keys else None
+    spot_prices_map = get_token_prices() if has_holdings else None
+    alpha_holdings = get_alpha_holdings() if (has_holdings and ALPHA_TOKENS) else None
 
-        total += alpha_total
+    spot_total = calculate_spot_value(SPOT_TOKENS, spot_balances, spot_prices_map) if has_holdings else 0.0
+    futures_total = calculate_futures_value(futures_balances) if has_holdings else 0.0
+    alpha_total = calculate_alpha_value(alpha_holdings, ALPHA_TOKENS) if has_holdings else 0.0
+    grand_total = spot_total + futures_total + alpha_total
 
-        items.append({"label": "────────", "value": "────────", "color": "#666666"})
-        items.append({
-            "label": "持仓总值",
-            "value": format_value(total),
-            "color": "#2196F3",
-        })
-        for token, _amount, value in details:
-            items.append({
-                "label": token,
-                "value": format_value(value),
-                "color": "#9E9E9E",
-            })
+    items = []
+
+    # ── 表头 + 总值 (始终置顶) ──
+    total_text = format_value(grand_total) if has_holdings else DASH
+    items.append({
+        "label": "总值",
+        "value": "",
+        "color": "#FF9800",
+        "cells": ["", "", total_text],
+    })
+
+    # ── 收集所有数据行 (待排序) ──
+    # 每个元素: (持仓价值, 行 dict)
+    rows: list[tuple[float, dict]] = []
+    spot_names = {s.replace("USDT", "").replace("USDC", "") for s in SPOT_SYMBOLS}
+
+    def add_row(name: str, price: str | float | None, change: float | None,
+                hold_val: float | None, color: str) -> None:
+        rows.append((
+            hold_val or 0.0,
+            {
+                "label": name,
+                "value": "",
+                "color": color,
+                "cells": [fmt_price(price), fmt_change(change), fmt_hold(hold_val)],
+            },
+        ))
+
+    # 现货行情/持仓
+    for symbol in SPOT_SYMBOLS:
+        name = symbol.replace("USDT", "").replace("USDC", "")
+        info = spot_market.get(name)
+        price = info["price"] if info else None
+        change = float(info["change"]) if info and info["change"] else (0.0 if info else None)
+        color = color_for_change(change) if change is not None else "#FFFFFF"
+
+        hold_val: float | None = None
+        if has_holdings and spot_prices_map:
+            unit_price = spot_prices_map.get(name, 0)
+            if name in TOKEN_AMOUNTS:
+                hold_val = TOKEN_AMOUNTS[name] * unit_price
+            elif spot_balances and name in spot_balances:
+                hold_val = spot_balances[name] * unit_price
+        add_row(name, price, change, hold_val, color)
+
+    # 合约行情/持仓 (现货同名代币不再重复计算持仓)
+    for symbol in FUTURES_SYMBOLS:
+        name = symbol.replace("USDT", "").replace("USDC", "")
+        info = futures_market.get(name)
+        price = info["price"] if info else None
+        change = float(info["change"]) if info and info["change"] else (0.0 if info else None)
+        color = color_for_change(change) if change is not None else "#FFFFFF"
+
+        hold_val = None
+        if has_holdings and spot_prices_map and name not in spot_names:
+            unit_price = spot_prices_map.get(name, 0)
+            if name in TOKEN_AMOUNTS:
+                hold_val = TOKEN_AMOUNTS[name] * unit_price
+            elif spot_balances and name in spot_balances:
+                hold_val = spot_balances[name] * unit_price
+        add_row(name, price, change, hold_val, color)
+
+    # Alpha 行情/持仓
+    for token in ALPHA_TOKENS:
+        info = alpha_market.get(token)
+        price = info["price"] if info else None
+        change = info["change"] if info else None
+        color = color_for_change(change) if change is not None else "#FFFFFF"
+
+        hold_val = None
+        if alpha_holdings and token in alpha_holdings:
+            hold_val = alpha_holdings[token]["valuation"]
+        add_row(token, price, change, hold_val, color)
+
+    # 合约 USDT 余额 (无价格无涨跌，仅持仓)
+    if has_holdings and futures_total > 0:
+        rows.append((
+            futures_total,
+            {
+                "label": "合约USDT",
+                "value": "",
+                "color": "#FFFFFF",
+                "cells": [DASH, DASH, fmt_hold(futures_total)],
+            },
+        ))
+
+    # ── 按持仓价值降序排序后追加 ──
+    rows.sort(key=lambda r: r[0], reverse=True)
+    items.extend(row for _, row in rows)
 
     return {
         "title": "币安仪表盘",
