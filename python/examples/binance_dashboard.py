@@ -39,6 +39,7 @@ import os
 import sys
 import time
 import traceback
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -106,13 +107,13 @@ REFRESH_INTERVAL = 10
 # =================================
 
 
-def get_json(url: str, headers: dict | None = None) -> dict:
+def get_json(url: str, headers: dict | None = None, timeout: int = 10) -> dict:
     """请求 URL 并返回 JSON，支持 gzip 解压"""
     req_headers = {"User-Agent": "Mozilla/5.0", "Accept-Encoding": "gzip"}
     if headers:
         req_headers.update(headers)
     req = Request(url, headers=req_headers)
-    with urlopen(req, timeout=10) as response:
+    with urlopen(req, timeout=timeout) as response:
         content = response.read()
         if response.info().get("Content-Encoding") == "gzip":
             content = gzip.decompress(content)
@@ -181,13 +182,30 @@ def fetch_alpha_prices(tokens: list[str]) -> dict[str, dict]:
 
     返回: {symbol: {'price': float, 'change': float | None}}
     涨跌幅字段在不同版本 API 中可能缺失，此时为 None。
+
+    该 endpoint 偶发慢响应, 自动重试最多 3 次。
     """
     result: dict[str, dict] = {}
     if not tokens:
         return result
+    url = "https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/alpha/all/token/list"
+
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            data = get_json(url, timeout=20)
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))  # 0.5s, 1s 退避
+
+    if last_err is not None:
+        log_err(f"fetch_alpha_prices (after 3 retries)", last_err)
+        return result
+
     try:
-        url = "https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/alpha/all/token/list"
-        data = get_json(url)
         if data.get("code") == "000000":
             for token in data.get("data", []):
                 sym = token.get("symbol")
@@ -208,21 +226,26 @@ def fetch_alpha_prices(tokens: list[str]) -> dict[str, dict]:
                     "change": change,
                 }
     except Exception as e:
-        log_err("fetch_alpha_prices", e)
+        log_err("fetch_alpha_prices (parse)", e)
     return result
 
 
 # --- 持仓查询 ---
 
 
-def make_signed_request(url: str, params: dict | None = None) -> dict:
-    """发送带签名的币安 API 请求"""
+def make_signed_request(url: str, params: dict | None = None, timeout: int = 15) -> dict:
+    """发送带签名的币安 API 请求
+
+    HTTPError 时会读取响应体附带在异常 message 里, 便于定位币安返回的具体错误码。
+    """
     import hashlib
     import hmac as hmac_mod
 
     if params is None:
         params = {}
     params["timestamp"] = int(time.time() * 1000)
+    # recvWindow: 容忍本地与服务器时钟漂移; fapi 接口默认 5000ms 比较严格
+    params.setdefault("recvWindow", 10000)
     query_string = urlencode(params)
     signature = hmac_mod.new(
         SECRET_KEY.encode("utf-8"),
@@ -232,8 +255,18 @@ def make_signed_request(url: str, params: dict | None = None) -> dict:
     params["signature"] = signature
     full_url = f"{url}?{urlencode(params)}"
     req = Request(full_url, headers={"X-MBX-APIKEY": API_KEY, "User-Agent": "Mozilla/5.0"})
-    with urlopen(req, timeout=10) as response:
-        return json.loads(response.read())
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read())
+    except HTTPError as e:
+        # 读取币安返回的错误 JSON, 附带在异常上重新抛出
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = "<no body>"
+        raise HTTPError(
+            e.url, e.code, f"{e.reason} | body={body}", e.headers, None
+        ) from None
 
 
 def get_spot_balances() -> dict[str, float] | None:
