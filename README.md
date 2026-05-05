@@ -20,6 +20,7 @@ cd python && uv sync
 
 ```bash
 uv run python examples/system_monitor.py
+uv run python examples/binance_dashboard.py
 ```
 
 ## Python API
