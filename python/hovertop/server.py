@@ -61,6 +61,8 @@ class WidgetServer:
             self._loop.call_soon_threadsafe(self._shutdown)
             if self._thread:
                 self._thread.join(timeout=3.0)
+            self._server = None
+            self._client = None
 
     def _shutdown(self) -> None:
         """在事件循环中执行优雅关闭"""
