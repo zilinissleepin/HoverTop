@@ -131,6 +131,20 @@ def test_fetch_quotes_request_error_returns_empty(monkeypatch, capsys):
     assert "network down" in err
 
 
+def test_fetch_quotes_us_code_with_underscore(monkeypatch):
+    """美股 code 如 gb_aapl 含下划线, 提取时不能用 rsplit('_', 1)。"""
+    body = (
+        'var hq_str_gb_aapl="苹果,287.44,-0.02,2026-05-08 09:42:56,extra";\n'
+    ).encode("gbk")
+    fake_get = MagicMock(return_value=_FakeResp(body))
+    monkeypatch.setattr("stock_dashboard.requests.get", fake_get)
+
+    result = fetch_quotes(["gb_aapl"], market="us")
+    assert set(result.keys()) == {"gb_aapl"}
+    assert result["gb_aapl"]["price"] == pytest.approx(287.44)
+    assert result["gb_aapl"]["change_pct"] == pytest.approx(-0.02)
+
+
 from stock_dashboard import format_price, format_change_pct
 
 

@@ -132,16 +132,16 @@ def fetch_quotes(codes: list[str], market: str) -> dict[str, Quote]:
         return {}
 
     result: dict[str, Quote] = {}
+    # 按 code 在响应中查找对应行 (不能用 rsplit("_", 1)，因为美股 code 含下划线)
     for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
-        # 形如 var hq_str_sh600519="..."; 提取 code
-        head = line.split("=", 1)[0]  # 'var hq_str_sh600519'
-        parts = head.rsplit("_", 1)
-        if len(parts) != 2:
+        head = line.split("=", 1)[0]  # 'var hq_str_<code>'
+        prefix = "var hq_str_"
+        if not head.startswith(prefix):
             continue
-        code = parts[1]
+        code = head[len(prefix):]
         if code not in codes:
             continue
         q = parser(code, line)
