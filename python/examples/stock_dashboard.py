@@ -1,7 +1,13 @@
 """股票行情悬浮窗 - A股/港股/美股 当前价和涨跌幅, 每 10 秒刷新。"""
 from __future__ import annotations
 
+import os
+import sys
+import time
+import traceback
 from typing import TypedDict
+
+import requests
 
 
 class Quote(TypedDict):
@@ -73,3 +79,59 @@ def parse_us_line(code: str, line: str) -> Quote | None:
     except (ValueError, IndexError):
         return None
     return Quote(name=name, price=price, change_pct=change_pct)
+
+
+SINA_URL = "https://hq.sinajs.cn/list="
+SINA_HEADERS = {
+    "Referer": "https://finance.sina.com.cn",
+    "User-Agent": "Mozilla/5.0",
+}
+
+
+def log_err(where: str, exc: BaseException) -> None:
+    print(
+        f"[{time.strftime('%H:%M:%S')}] {where}: {type(exc).__name__}: {exc}",
+        file=sys.stderr,
+    )
+    if os.environ.get("DEBUG"):
+        traceback.print_exc(file=sys.stderr)
+
+
+_PARSERS = {
+    "cn": parse_cn_line,
+    "hk": parse_hk_line,
+    "us": parse_us_line,
+}
+
+
+def fetch_quotes(codes: list[str], market: str) -> dict[str, Quote]:
+    """批量拉取一个市场的行情, 返回 {code: Quote}, 解析失败的 code 不在 dict 中。"""
+    if not codes:
+        return {}
+    parser = _PARSERS[market]
+    url = SINA_URL + ",".join(codes)
+    try:
+        resp = requests.get(url, headers=SINA_HEADERS, timeout=10)
+        resp.raise_for_status()
+        text = resp.content.decode("gbk", errors="replace")
+    except Exception as e:
+        log_err(f"fetch_quotes({market})", e)
+        return {}
+
+    result: dict[str, Quote] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # 形如 var hq_str_sh600519="..."; 提取 code
+        head = line.split("=", 1)[0]  # 'var hq_str_sh600519'
+        parts = head.rsplit("_", 1)
+        if len(parts) != 2:
+            continue
+        code = parts[1]
+        if code not in codes:
+            continue
+        q = parser(code, line)
+        if q is not None:
+            result[code] = q
+    return result

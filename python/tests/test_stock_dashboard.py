@@ -77,3 +77,55 @@ def test_parse_us_line_negative_change():
 def test_parse_us_line_empty_payload():
     line = 'var hq_str_gb_xxxx="";'
     assert parse_us_line("gb_xxxx", line) is None
+
+
+from unittest.mock import MagicMock
+
+from stock_dashboard import fetch_quotes
+
+
+class _FakeResp:
+    def __init__(self, content: bytes, status: int = 200) -> None:
+        self.content = content
+        self.status_code = status
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def test_fetch_quotes_cn_parses_gbk(monkeypatch):
+    body = (
+        'var hq_str_sh600519="贵州茅台,1630.00,1630.00,1650.00,1660.00,1620.00,a,b";\n'
+        'var hq_str_sz000001="平安银行,12.00,12.50,12.45,12.60,12.30,a,b";\n'
+    ).encode("gbk")
+
+    fake_get = MagicMock(return_value=_FakeResp(body))
+    monkeypatch.setattr("stock_dashboard.requests.get", fake_get)
+
+    result = fetch_quotes(["sh600519", "sz000001"], market="cn")
+    assert set(result.keys()) == {"sh600519", "sz000001"}
+    assert result["sh600519"]["name"] == "贵州茅台"
+    assert result["sz000001"]["price"] == pytest.approx(12.45)
+
+    # 确认带了 Referer 头
+    _, kwargs = fake_get.call_args
+    assert kwargs["headers"]["Referer"] == "https://finance.sina.com.cn"
+
+
+def test_fetch_quotes_empty_list_no_request(monkeypatch):
+    fake_get = MagicMock()
+    monkeypatch.setattr("stock_dashboard.requests.get", fake_get)
+    result = fetch_quotes([], market="cn")
+    assert result == {}
+    fake_get.assert_not_called()
+
+
+def test_fetch_quotes_request_error_returns_empty(monkeypatch, capsys):
+    fake_get = MagicMock(side_effect=RuntimeError("network down"))
+    monkeypatch.setattr("stock_dashboard.requests.get", fake_get)
+    result = fetch_quotes(["sh600519"], market="cn")
+    assert result == {}
+    # 错误打到 stderr
+    err = capsys.readouterr().err
+    assert "network down" in err
