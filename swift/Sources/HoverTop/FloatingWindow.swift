@@ -4,7 +4,7 @@ import AppKit
 final class FloatingWindowManager {
     private var window: NSWindow?
 
-    func show() {
+    func show(offsetY: CGFloat = 0) {
         if window != nil { return }
 
         let contentView = ContentView()
@@ -24,11 +24,11 @@ final class FloatingWindowManager {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
 
-        // 居中显示在屏幕右上角
+        // 居中显示在屏幕右上角; offsetY 向下偏移, 支持多个窗口错开
         if let screen = NSScreen.main {
             let screenFrame = screen.visibleFrame
             let x = screenFrame.maxX - 300
-            let y = screenFrame.maxY - 250
+            let y = screenFrame.maxY - 250 - offsetY
             window.setFrameOrigin(NSPoint(x: x, y: y))
         }
 

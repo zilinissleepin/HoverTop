@@ -6,18 +6,33 @@ from hovertop.models import DisplayData, DisplayItem
 from hovertop.server import WidgetServer
 
 
+# 进程内已启动的悬浮窗个数, 用于让多个 Widget 在屏幕上自动错开位置
+_WIDGET_COUNT = 0
+
+# 单个窗口大致垂直占用 (px), 用于错开多个悬浮窗
+_WINDOW_VSPACING = 240
+
+
 class Widget:
     """悬浮窗控件的公开 API"""
 
     def __init__(
         self,
         name: str = "HoverTop",
-        port: int = 9527,
+        port: int = 0,
         auto_launch: bool = True,
+        offset_y: float | None = None,
     ) -> None:
+        """创建一个悬浮窗
+
+        - port: WebSocket 端口, 默认 0 让 OS 自动分配 (支持同机多个悬浮窗)
+        - offset_y: 窗口相对屏幕右上角默认位置向下偏移的像素;
+          默认按进程内启动顺序自动递增 (0, 240, 480, ...)
+        """
         self.name = name
         self._server = WidgetServer(port=port)
         self._auto_launch = auto_launch
+        self._offset_y = offset_y
         self._app_process: Any = None
 
     @property
@@ -30,10 +45,13 @@ class Widget:
 
     def start(self) -> None:
         """启动 WebSocket 服务器（和可选的 Swift app）"""
+        global _WIDGET_COUNT
         self._server.start()
         if self._auto_launch:
             from hovertop.app_manager import launch_app
-            self._app_process = launch_app(port=self.port)
+            offset_y = self._offset_y if self._offset_y is not None else _WIDGET_COUNT * _WINDOW_VSPACING
+            self._app_process = launch_app(port=self.port, offset_y=offset_y)
+            _WIDGET_COUNT += 1
 
     def update(self, **kwargs: Any) -> None:
         """更新悬浮窗内容"""

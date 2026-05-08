@@ -16,12 +16,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var webSocketClient: WebSocketClient?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // 解析命令行参数获取端口
         let port = parsePort()
+        let offsetY = parseOffsetY()
         // 隐藏 dock 图标
         NSApp.setActivationPolicy(.accessory)
         // 显示悬浮窗
-        windowManager.show()
+        windowManager.show(offsetY: offsetY)
         // 连接 WebSocket
         webSocketClient = WebSocketClient(port: port)
         webSocketClient?.connect()
@@ -38,5 +38,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return Int(args[idx + 1]) ?? 9527
         }
         return 9527
+    }
+
+    private func parseOffsetY() -> CGFloat {
+        let args = CommandLine.arguments
+        if let idx = args.firstIndex(of: "--offset-y"), idx + 1 < args.count {
+            return CGFloat(Double(args[idx + 1]) ?? 0)
+        }
+        return 0
     }
 }

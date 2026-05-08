@@ -29,21 +29,26 @@ def find_app() -> Path | None:
     return None
 
 
-def launch_app(port: int = 9527) -> subprocess.Popen[bytes] | None:
-    """启动 HoverTop app，传递 WebSocket 端口"""
+def launch_app(port: int = 9527, offset_y: float = 0) -> subprocess.Popen[bytes] | None:
+    """启动 HoverTop app, 传递 WebSocket 端口和窗口 Y 偏移
+
+    - port: Swift app 连接的 WebSocket 端口
+    - offset_y: 窗口相对于屏幕右上角默认位置向下的像素偏移, 用于多窗口错开
+    """
     app_path = find_app()
     if app_path is None:
         return None
-    # macOS .app bundle 使用 open 命令启动
+    cli_args = ["--port", str(port), "--offset-y", str(offset_y)]
+    # macOS .app bundle 使用 open 命令启动; -n 允许启动多个实例
     if app_path.is_dir() and app_path.suffix == ".app":
         proc = subprocess.Popen(
-            ["open", "-a", str(app_path), "--args", "--port", str(port)],
+            ["open", "-n", "-a", str(app_path), "--args", *cli_args],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
     else:
         proc = subprocess.Popen(
-            [str(app_path), "--port", str(port)],
+            [str(app_path), *cli_args],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
