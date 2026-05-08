@@ -33,16 +33,14 @@
 调用方式: uv run python examples/binance_dashboard.py
 """
 
-import gzip
-import json
+import hashlib
+import hmac as hmac_mod
 import os
 import sys
 import time
 import traceback
-from urllib.error import HTTPError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
+import requests
 from dotenv import load_dotenv
 from hovertop import Widget
 
@@ -107,17 +105,14 @@ REFRESH_INTERVAL = 10
 # =================================
 
 
-def get_json(url: str, headers: dict | None = None, timeout: int = 10) -> dict:
-    """请求 URL 并返回 JSON，支持 gzip 解压"""
-    req_headers = {"User-Agent": "Mozilla/5.0", "Accept-Encoding": "gzip"}
+def get_json(url: str, headers: dict | None = None, timeout: int = 15) -> dict:
+    """请求 URL 并返回 JSON"""
+    req_headers = {"User-Agent": "Mozilla/5.0"}
     if headers:
         req_headers.update(headers)
-    req = Request(url, headers=req_headers)
-    with urlopen(req, timeout=timeout) as response:
-        content = response.read()
-        if response.info().get("Content-Encoding") == "gzip":
-            content = gzip.decompress(content)
-        return json.loads(content)
+    resp = requests.get(url, headers=req_headers, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def format_number(value: float) -> str:
@@ -241,44 +236,40 @@ def make_signed_request(
 ) -> dict:
     """发送带签名的币安 API 请求
 
-    - 自动重试 (默认共 3 次): 网络超时/读超时时退避后重试
-    - HTTPError 时读取响应体附带在异常 message 里, 不重试 (避免重复触发 ban)
+    - 自动重试 (默认共 3 次): 网络超时时退避后重试
+    - HTTP 4xx/5xx 不重试, 直接抛出含响应体的异常
     """
-    import hashlib
-    import hmac as hmac_mod
-
     last_err: Exception | None = None
     for attempt in range(retries + 1):
         # 每次重新算 timestamp+签名 (避免时间戳过期)
         local_params = dict(params) if params else {}
         local_params["timestamp"] = int(time.time() * 1000)
-        # recvWindow: 容忍本地与服务器时钟漂移; fapi 接口默认 5000ms 比较严格
         local_params.setdefault("recvWindow", 10000)
-        query_string = urlencode(local_params)
+        query_string = "&".join(f"{k}={v}" for k, v in local_params.items())
         signature = hmac_mod.new(
             SECRET_KEY.encode("utf-8"),
             query_string.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
         local_params["signature"] = signature
-        full_url = f"{url}?{urlencode(local_params)}"
-        req = Request(full_url, headers={"X-MBX-APIKEY": API_KEY, "User-Agent": "Mozilla/5.0"})
         try:
-            with urlopen(req, timeout=timeout) as response:
-                return json.loads(response.read())
-        except HTTPError as e:
-            # 4xx/5xx: 读取币安返回的错误 JSON, 不重试
-            try:
-                body = e.read().decode("utf-8", errors="replace")
-            except Exception:
-                body = "<no body>"
-            raise HTTPError(
-                e.url, e.code, f"{e.reason} | body={body}", e.headers, None
-            ) from None
-        except (TimeoutError, OSError) as e:
+            resp = requests.get(
+                url,
+                params=local_params,
+                headers={"X-MBX-APIKEY": API_KEY, "User-Agent": "Mozilla/5.0"},
+                timeout=timeout,
+            )
+            if resp.status_code >= 400:
+                raise requests.HTTPError(
+                    f"HTTP {resp.status_code} | body={resp.text}", response=resp
+                )
+            return resp.json()
+        except requests.HTTPError:
+            raise
+        except (requests.Timeout, requests.ConnectionError, OSError) as e:
             last_err = e
             if attempt < retries:
-                time.sleep(0.5 * (attempt + 1))  # 0.5s, 1s 退避
+                time.sleep(0.5 * (attempt + 1))
 
     assert last_err is not None
     raise last_err
@@ -342,15 +333,15 @@ def get_alpha_holdings() -> dict[str, dict] | None:
         return None
     try:
         url = "https://www.binance.com/bapi/defi/v1/private/wallet-direct/cloud-wallet/alpha"
-        req = Request(url, headers={
+        resp = requests.get(url, headers={
             "clienttype": "web",
             "content-type": "application/json",
             "csrftoken": BINANCE_CSRFTOKEN,
             "user-agent": "Mozilla/5.0",
             "Cookie": BINANCE_COOKIE,
-        })
-        with urlopen(req, timeout=10) as response:
-            data = json.loads(response.read())
+        }, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
 
         if data.get("code") != "000000":
             return None
