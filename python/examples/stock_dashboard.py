@@ -56,3 +56,20 @@ def parse_hk_line(code: str, line: str) -> Quote | None:
         return None
     change_pct = (price - prev_close) / prev_close * 100
     return Quote(name=name, price=price, change_pct=change_pct)
+
+
+def parse_us_line(code: str, line: str) -> Quote | None:
+    """解析一行美股 新浪响应。涨跌幅字段直接可用。"""
+    payload = _extract_payload(line)
+    if not payload:
+        return None
+    fields = payload.split(",")
+    if len(fields) < 3:
+        return None
+    try:
+        name = fields[0]
+        price = float(fields[1])
+        change_pct = float(fields[2])
+    except (ValueError, IndexError):
+        return None
+    return Quote(name=name, price=price, change_pct=change_pct)

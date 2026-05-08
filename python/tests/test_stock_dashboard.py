@@ -52,3 +52,28 @@ def test_parse_hk_line_fallback_to_english_name():
 def test_parse_hk_line_empty_payload():
     line = 'var hq_str_hk99999="";'
     assert parse_hk_line("hk99999", line) is None
+
+
+from stock_dashboard import parse_us_line
+
+
+def test_parse_us_line_normal():
+    # [0]名称 [1]当前价 [2]涨跌幅 [3]日期, 后面字段省略
+    line = 'var hq_str_gb_aapl="Apple Inc,175.50,0.8614,2026-05-08 09:30:00,...";'
+    q = parse_us_line("gb_aapl", line)
+    assert q is not None
+    assert q["name"] == "Apple Inc"
+    assert q["price"] == pytest.approx(175.50)
+    assert q["change_pct"] == pytest.approx(0.8614)
+
+
+def test_parse_us_line_negative_change():
+    line = 'var hq_str_gb_tsla="Tesla Inc,245.00,-2.30,2026-05-08 09:30:00,...";'
+    q = parse_us_line("gb_tsla", line)
+    assert q is not None
+    assert q["change_pct"] == pytest.approx(-2.30)
+
+
+def test_parse_us_line_empty_payload():
+    line = 'var hq_str_gb_xxxx="";'
+    assert parse_us_line("gb_xxxx", line) is None
