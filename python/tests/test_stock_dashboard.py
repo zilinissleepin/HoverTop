@@ -156,3 +156,39 @@ def test_format_change_pct_negative():
 
 def test_format_change_pct_zero():
     assert format_change_pct(0.0) == "+0.00%"
+
+
+from stock_dashboard import build_market_rows
+
+
+def test_build_market_rows_sorted_desc():
+    quotes = {
+        "a": Quote(name="A", price=10.0, change_pct=1.0),
+        "b": Quote(name="B", price=20.0, change_pct=3.5),
+        "c": Quote(name="C", price=30.0, change_pct=-2.0),
+    }
+    rows = build_market_rows(["a", "b", "c"], quotes)
+    # 按涨跌幅降序: B(3.5) > A(1.0) > C(-2.0)
+    assert [r["label"] for r in rows] == ["B", "A", "C"]
+
+
+def test_build_market_rows_missing_shown_as_dash():
+    quotes = {
+        "a": Quote(name="A", price=10.0, change_pct=1.0),
+    }
+    rows = build_market_rows(["a", "b"], quotes)
+    # 解析失败的 'b' 排最后, 显示 '—' 和白色
+    assert rows[0]["label"] == "A"
+    assert rows[1]["label"] == "b"  # 用原 code 作为名字
+    assert rows[1]["cells"] == ["—", "—"]
+    assert rows[1]["color"] == "#FFFFFF"
+
+
+def test_build_market_rows_colors():
+    quotes = {
+        "up": Quote(name="U", price=1.0, change_pct=2.0),
+        "dn": Quote(name="D", price=1.0, change_pct=-1.0),
+    }
+    rows = build_market_rows(["up", "dn"], quotes)
+    assert rows[0]["color"] == "#4CAF50"  # 涨绿
+    assert rows[1]["color"] == "#F44336"  # 跌红

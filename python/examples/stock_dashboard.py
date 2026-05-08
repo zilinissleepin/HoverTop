@@ -149,3 +149,41 @@ def format_price(value: float) -> str:
 def format_change_pct(pct: float) -> str:
     """格式化涨跌幅百分比，带正负号和两位小数。"""
     return f"{pct:+.2f}%"
+
+
+COLOR_UP = "#4CAF50"
+COLOR_DOWN = "#F44336"
+COLOR_MISSING = "#FFFFFF"
+COLOR_HEADER = "#FF9800"
+DASH = "—"
+
+
+def _color_for_change(pct: float) -> str:
+    return COLOR_UP if pct >= 0 else COLOR_DOWN
+
+
+def build_market_rows(codes: list[str], quotes: dict[str, Quote]) -> list[dict]:
+    """返回 DisplayItem 等价 dict 列表, 按 change_pct 降序; 缺失的 code 排最后。"""
+    rows_ok: list[tuple[float, dict]] = []
+    rows_missing: list[dict] = []
+    for code in codes:
+        q = quotes.get(code)
+        if q is None:
+            rows_missing.append({
+                "label": code,
+                "value": "",
+                "color": COLOR_MISSING,
+                "cells": [DASH, DASH],
+            })
+            continue
+        rows_ok.append((
+            q["change_pct"],
+            {
+                "label": q["name"],
+                "value": "",
+                "color": _color_for_change(q["change_pct"]),
+                "cells": [format_price(q["price"]), format_change_pct(q["change_pct"])],
+            },
+        ))
+    rows_ok.sort(key=lambda r: r[0], reverse=True)
+    return [row for _, row in rows_ok] + rows_missing
