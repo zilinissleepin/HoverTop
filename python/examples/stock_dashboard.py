@@ -187,3 +187,37 @@ def build_market_rows(codes: list[str], quotes: dict[str, Quote]) -> list[dict]:
         ))
     rows_ok.sort(key=lambda r: r[0], reverse=True)
     return [row for _, row in rows_ok] + rows_missing
+
+
+def build_data(
+    cn_codes: list[str],
+    hk_codes: list[str],
+    us_codes: list[str],
+    refresh_interval: int,
+) -> dict:
+    """组装三市场数据，返回展示用的字典。"""
+    sections: list[tuple[str, list[str], str]] = [
+        ("A股", cn_codes, "cn"),
+        ("港股", hk_codes, "hk"),
+        ("美股", us_codes, "us"),
+    ]
+    items: list[dict] = []
+    for name, codes, market in sections:
+        if not codes:
+            continue
+        quotes = fetch_quotes(codes, market=market)
+        # 分段表头
+        items.append({
+            "label": name,
+            "value": "",
+            "color": COLOR_HEADER,
+            "cells": ["", ""],
+        })
+        items.extend(build_market_rows(codes, quotes))
+
+    return {
+        "title": "股票行情",
+        "subtitle": time.strftime("%H:%M:%S"),
+        "items": items,
+        "footer": f"每 {refresh_interval} 秒刷新 | Ctrl+C 退出",
+    }
