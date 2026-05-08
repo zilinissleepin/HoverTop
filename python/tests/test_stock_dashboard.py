@@ -129,3 +129,30 @@ def test_fetch_quotes_request_error_returns_empty(monkeypatch, capsys):
     # 错误打到 stderr
     err = capsys.readouterr().err
     assert "network down" in err
+
+
+from stock_dashboard import format_price, format_change_pct
+
+
+def test_format_price_large():
+    assert format_price(1650.0) == "1,650.00"
+
+
+def test_format_price_small():
+    assert format_price(0.1234) == "0.1234"
+
+
+def test_format_price_zero():
+    assert format_price(0.0) == "0"
+
+
+def test_format_change_pct_positive():
+    assert format_change_pct(1.23) == "+1.23%"
+
+
+def test_format_change_pct_negative():
+    assert format_change_pct(-0.80) == "-0.80%"
+
+
+def test_format_change_pct_zero():
+    assert format_change_pct(0.0) == "+0.00%"

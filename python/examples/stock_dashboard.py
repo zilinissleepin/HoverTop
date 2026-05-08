@@ -135,3 +135,17 @@ def fetch_quotes(codes: list[str], market: str) -> dict[str, Quote]:
         if q is not None:
             result[code] = q
     return result
+
+
+def format_price(value: float) -> str:
+    """格式化股票价格。大于等于 1 的数字用千位分隔符和两位小数，小于 1 的用 4 位有效数字，0 返回 '0'。"""
+    if value == 0:
+        return "0"
+    if abs(value) >= 1:
+        return f"{value:,.2f}"
+    return f"{value:.4g}"
+
+
+def format_change_pct(pct: float) -> str:
+    """格式化涨跌幅百分比，带正负号和两位小数。"""
+    return f"{pct:+.2f}%"
