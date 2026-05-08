@@ -21,6 +21,7 @@ cd python && uv sync
 ```bash
 uv run python examples/system_monitor.py
 uv run python examples/binance_dashboard.py
+uv run python examples/stock_dashboard.py
 ```
 
 ## Python API
@@ -57,3 +58,14 @@ with Widget("监控") as w:
 | items[].value | string | 值 |
 | items[].color | string | 颜色 (十六进制) |
 | footer | string | 底部文字 |
+
+## 股票行情示例环境变量
+
+在 `python/.env` 配置以下任一市场（空的市场段不显示）：
+
+```
+CN_STOCKS=sh600519,sz000001
+HK_STOCKS=00700,09988
+US_STOCKS=AAPL,TSLA
+REFRESH_INTERVAL=10
+```
