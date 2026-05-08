@@ -36,3 +36,23 @@ def parse_cn_line(code: str, line: str) -> Quote | None:
         return None
     change_pct = (price - prev_close) / prev_close * 100
     return Quote(name=name, price=price, change_pct=change_pct)
+
+
+def parse_hk_line(code: str, line: str) -> Quote | None:
+    """解析一行港股 新浪响应。"""
+    payload = _extract_payload(line)
+    if not payload:
+        return None
+    fields = payload.split(",")
+    if len(fields) < 7:
+        return None
+    try:
+        name = fields[1] or fields[0]  # 中文名为空时用英文名
+        prev_close = float(fields[3])
+        price = float(fields[6])
+    except (ValueError, IndexError):
+        return None
+    if prev_close <= 0:
+        return None
+    change_pct = (price - prev_close) / prev_close * 100
+    return Quote(name=name, price=price, change_pct=change_pct)

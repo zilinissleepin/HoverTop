@@ -27,3 +27,28 @@ def test_parse_cn_line_zero_prev_close():
     line = 'var hq_str_sh000000="测试,0.00,0.00,0.00,0.00,0.00,a,b";'
     q = parse_cn_line("sh000000", line)
     assert q is None
+
+
+from stock_dashboard import parse_hk_line
+
+
+def test_parse_hk_line_normal():
+    # fields: 英文名, 中文名, 今开, 昨收, 最高, 最低, 当前价, ...
+    line = 'var hq_str_hk00700="TENCENT,腾讯控股,378.00,380.00,382.00,376.00,381.00,extra";'
+    q = parse_hk_line("hk00700", line)
+    assert q is not None
+    assert q["name"] == "腾讯控股"
+    assert q["price"] == pytest.approx(381.00)
+    assert q["change_pct"] == pytest.approx((381.00 - 380.00) / 380.00 * 100)
+
+
+def test_parse_hk_line_fallback_to_english_name():
+    line = 'var hq_str_hk00700="TENCENT,,378.00,380.00,382.00,376.00,381.00,extra";'
+    q = parse_hk_line("hk00700", line)
+    assert q is not None
+    assert q["name"] == "TENCENT"
+
+
+def test_parse_hk_line_empty_payload():
+    line = 'var hq_str_hk99999="";'
+    assert parse_hk_line("hk99999", line) is None
