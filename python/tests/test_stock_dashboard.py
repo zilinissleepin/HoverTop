@@ -194,8 +194,16 @@ def test_build_market_rows_missing_shown_as_dash():
     # 解析失败的 'b' 排最后, 显示 '—' 和白色
     assert rows[0]["label"] == "A"
     assert rows[1]["label"] == "b"  # 用原 code 作为名字
-    assert rows[1]["cells"] == ["—", "—"]
+    assert rows[1]["cells"] == ["—", "—", ""]
     assert rows[1]["color"] == "#FFFFFF"
+
+
+def test_build_market_rows_cells_have_three_columns():
+    """Swift 端 ContentView 要求 cells.count >= 3 才走多列渲染路径。"""
+    quotes = {"a": Quote(name="A", price=10.0, change_pct=1.0)}
+    rows = build_market_rows(["a", "missing"], quotes)
+    for r in rows:
+        assert len(r["cells"]) == 3
 
 
 def test_build_market_rows_colors():

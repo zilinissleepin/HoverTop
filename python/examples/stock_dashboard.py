@@ -176,7 +176,11 @@ def _color_for_change(pct: float) -> str:
 
 
 def build_market_rows(codes: list[str], quotes: dict[str, Quote]) -> list[dict]:
-    """返回 DisplayItem 等价 dict 列表, 按 change_pct 降序; 缺失的 code 排最后。"""
+    """返回 DisplayItem 等价 dict 列表, 按 change_pct 降序; 缺失的 code 排最后。
+
+    每行 cells 固定 3 列 (price, change, 空), 第三列留空是为了和 Swift 端
+    ContentView 的 cells.count >= 3 判定以及 binance_dashboard 的列宽对齐。
+    """
     rows_ok: list[tuple[float, dict]] = []
     rows_missing: list[dict] = []
     for code in codes:
@@ -186,7 +190,7 @@ def build_market_rows(codes: list[str], quotes: dict[str, Quote]) -> list[dict]:
                 "label": code,
                 "value": "",
                 "color": COLOR_MISSING,
-                "cells": [DASH, DASH],
+                "cells": [DASH, DASH, ""],
             })
             continue
         rows_ok.append((
@@ -195,7 +199,7 @@ def build_market_rows(codes: list[str], quotes: dict[str, Quote]) -> list[dict]:
                 "label": q["name"],
                 "value": "",
                 "color": _color_for_change(q["change_pct"]),
-                "cells": [format_price(q["price"]), format_change_pct(q["change_pct"])],
+                "cells": [format_price(q["price"]), format_change_pct(q["change_pct"]), ""],
             },
         ))
     rows_ok.sort(key=lambda r: r[0], reverse=True)
@@ -224,7 +228,7 @@ def build_data(
             "label": name,
             "value": "",
             "color": COLOR_HEADER,
-            "cells": ["", ""],
+            "cells": ["", "", ""],
         })
         items.extend(build_market_rows(codes, quotes))
 
