@@ -1,4 +1,17 @@
-"""股票行情悬浮窗 - A股/港股/美股 当前价和涨跌幅, 每 10 秒刷新。"""
+"""股票行情悬浮窗 - A股/港股/美股 当前价和涨跌幅, 每 10 秒刷新。
+
+数据源: 新浪财经 (https://hq.sinajs.cn), 需要带 Referer。
+
+环境变量 (任一可空; 空的市场段不显示):
+  CN_STOCKS=sh600519,sz000001      A股, 用 sh/sz 前缀
+  HK_STOCKS=00700,09988            港股, 5 位代码
+  US_STOCKS=AAPL,TSLA              美股, 大写 ticker
+  REFRESH_INTERVAL=10              刷新间隔秒数, 默认 10
+
+.env 放在 python/.env, 自动加载。
+
+调用方式: uv run python examples/stock_dashboard.py
+"""
 from __future__ import annotations
 
 import os
@@ -221,3 +234,64 @@ def build_data(
         "items": items,
         "footer": f"每 {refresh_interval} 秒刷新 | Ctrl+C 退出",
     }
+
+
+from dotenv import load_dotenv
+from hovertop import Widget
+
+
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+
+def _parse_list(env_name: str) -> list[str]:
+    raw = os.environ.get(env_name, "")
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
+def _normalize_cn(codes: list[str]) -> list[str]:
+    # 期望用户已经带 sh/sz 前缀, 小写化以匹配新浪
+    return [c.lower() for c in codes]
+
+
+def _normalize_hk(codes: list[str]) -> list[str]:
+    # 补足到 5 位, 加 hk 前缀
+    out = []
+    for c in codes:
+        digits = c.lower().removeprefix("hk")
+        out.append("hk" + digits.zfill(5))
+    return out
+
+
+def _normalize_us(codes: list[str]) -> list[str]:
+    # 加 gb_ 前缀并小写
+    return [f"gb_{c.lower()}" for c in codes]
+
+
+def main() -> None:
+    cn_codes = _normalize_cn(_parse_list("CN_STOCKS"))
+    hk_codes = _normalize_hk(_parse_list("HK_STOCKS"))
+    us_codes = _normalize_us(_parse_list("US_STOCKS"))
+    refresh_interval = int(os.environ.get("REFRESH_INTERVAL", "10"))
+
+    if not (cn_codes or hk_codes or us_codes):
+        print("未配置任何股票. 请在 .env 中设置 CN_STOCKS / HK_STOCKS / US_STOCKS.", file=sys.stderr)
+        sys.exit(1)
+
+    with Widget("股票行情") as widget:
+        print("股票行情悬浮窗已启动, 按 Ctrl+C 退出...")
+        while True:
+            try:
+                data = build_data(cn_codes, hk_codes, us_codes, refresh_interval)
+                widget.update(**data)
+            except Exception as e:
+                log_err("build_data/update", e)
+                widget.update(
+                    title="股票行情",
+                    subtitle="数据获取失败",
+                    items=[{"label": "错误", "value": str(e)[:50], "color": COLOR_DOWN}],
+                )
+            time.sleep(refresh_interval)
+
+
+if __name__ == "__main__":
+    main()
