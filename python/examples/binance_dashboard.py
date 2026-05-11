@@ -262,6 +262,7 @@ def make_signed_request(
                 params=local_params,
                 headers={"X-MBX-APIKEY": API_KEY, "User-Agent": "Mozilla/5.0"},
                 timeout=timeout,
+                proxies=_proxies,
             )
             if resp.status_code >= 400:
                 raise requests.HTTPError(
@@ -343,7 +344,7 @@ def get_alpha_holdings() -> dict[str, dict] | None:
             "csrftoken": BINANCE_CSRFTOKEN,
             "user-agent": "Mozilla/5.0",
             "Cookie": BINANCE_COOKIE,
-        }, timeout=15)
+        }, timeout=15, proxies=_proxies)
         resp.raise_for_status()
         data = resp.json()
 
