@@ -105,12 +105,16 @@ REFRESH_INTERVAL = 60
 # =================================
 
 
+PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+_proxies = {"https": PROXY, "http": PROXY} if PROXY else None
+
+
 def get_json(url: str, headers: dict | None = None, timeout: int = 15) -> dict:
     """请求 URL 并返回 JSON"""
     req_headers = {"User-Agent": "Mozilla/5.0"}
     if headers:
         req_headers.update(headers)
-    resp = requests.get(url, headers=req_headers, timeout=timeout)
+    resp = requests.get(url, headers=req_headers, timeout=timeout, proxies=_proxies)
     resp.raise_for_status()
     return resp.json()
 
