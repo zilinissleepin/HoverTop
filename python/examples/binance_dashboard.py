@@ -4,7 +4,7 @@
   主表 (按持仓价值降序): 总值 + 现货 + Alpha 各代币的价格/涨跌幅/持仓
   合约板块: 每个合约头寸的当前价/涨跌幅/浮盈浮亏 (按浮盈绝对值降序)
 
-每 10 秒刷新一次。
+每 60 秒刷新一次。
 
 必填环境变量 (代币列表, 直接用 TOKEN, 不带 USDT 后缀):
   SPOT_TOKENS    - 现货行情/持仓代币, 逗号分隔. 例: "VIRTUAL,BTC"
@@ -100,7 +100,7 @@ BINANCE_COOKIE = os.environ.get("BINANCE_COOKIE", "")
 BINANCE_CSRFTOKEN = os.environ.get("BINANCE_CSRFTOKEN", "")
 
 # 刷新间隔 (秒)
-REFRESH_INTERVAL = 10
+REFRESH_INTERVAL = 60
 
 # =================================
 
