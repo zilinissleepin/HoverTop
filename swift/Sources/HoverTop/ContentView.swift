@@ -2,6 +2,10 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var state = DisplayState.shared
+    @State private var isCollapsed = false
+
+    private let onClose: () -> Void
+    private let onCollapseChange: (Bool) -> Void
 
     /// 列宽配置 (与 Python 端约定)
     /// label | price | change | holding
@@ -14,41 +18,109 @@ struct ContentView: View {
         labelWidth + priceWidth + changeWidth + holdingWidth
     }
 
+    init(
+        onClose: @escaping () -> Void = { NSApplication.shared.terminate(nil) },
+        onCollapseChange: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.onClose = onClose
+        self.onCollapseChange = onCollapseChange
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // 标题区
-            if let title = state.data.title {
-                Text(title)
-                    .font(.headline)
-                    .foregroundColor(.primary)
-            }
-            if let subtitle = state.data.subtitle {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+            headerView
 
-            // 分隔线
-            if state.data.title != nil && !state.data.items.isEmpty {
-                Divider()
-            }
+            if !isCollapsed {
+                if let subtitle = state.data.subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
 
-            // 数据项
-            ForEach(state.data.items) { item in
-                rowView(for: item)
-            }
+                // 分隔线
+                if !state.data.items.isEmpty {
+                    Divider()
+                }
 
-            // 底部
-            if let footer = state.data.footer {
-                Divider()
-                Text(footer)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                // 数据项
+                ForEach(state.data.items) { item in
+                    rowView(for: item)
+                }
+
+                // 底部
+                if let footer = state.data.footer {
+                    Divider()
+                    Text(footer)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, isCollapsed ? 8 : 16)
         .frame(width: totalRowWidth + 32)  // 内容宽度 + 左右 padding
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var bannerTitle: String {
+        guard let title = state.data.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            return "HoverTop"
+        }
+        return title
+    }
+
+    private var headerView: some View {
+        HStack(spacing: 8) {
+            windowControlButton(
+                systemName: "xmark",
+                accessibilityLabel: "关闭浮窗",
+                backgroundColor: .red,
+                foregroundColor: .white,
+                action: onClose
+            )
+
+            windowControlButton(
+                systemName: isCollapsed ? "plus" : "minus",
+                accessibilityLabel: isCollapsed ? "恢复浮窗" : "最小化浮窗",
+                backgroundColor: .yellow,
+                foregroundColor: .black.opacity(0.65),
+                action: toggleCollapsed
+            )
+
+            Text(bannerTitle)
+                .font(.headline)
+                .foregroundColor(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func toggleCollapsed() {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            isCollapsed.toggle()
+        }
+        onCollapseChange(isCollapsed)
+    }
+
+    private func windowControlButton(
+        systemName: String,
+        accessibilityLabel: String,
+        backgroundColor: Color,
+        foregroundColor: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(foregroundColor)
+                .frame(width: 16, height: 16)
+                .background(backgroundColor, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     @ViewBuilder
